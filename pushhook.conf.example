@@ -1,0 +1,12 @@
+# Address to listen on (default :8080)
+listen 127.0.0.1:9000
+
+# GitHub: the "Secret" of the webhook (content type application/json).
+github-secret change-me
+
+# GitLab: the "Signing token" of the webhook (starts with whsec_).
+gitlab-secret whsec_Y2hhbmdlLW1lLWNoYW5nZS1tZS1jaGFuZ2UtbWU=
+
+# repo PROVIDER NAME COMMAND [ARGS...]
+repo github example/website /usr/local/bin/deploy-website.sh
+repo gitlab group/project   /usr/local/bin/deploy-project.sh --fast
