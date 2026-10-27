@@ -17,10 +17,12 @@ import (
 const testConf = `
 # comment
 listen :8080
-github-secret ghsecret
-gitlab-secret whsec_c2VjcmV0a2V5
-repo github Example/Site /bin/deploy -x
-repo gitlab grp/proj /bin/other
+github Example/Site ghsecret /bin/deploy -x
+github example/shared1 sharedsecret /bin/s1
+github example/shared2 sharedsecret /bin/s2
+github example/other othersecret /bin/other-gh
+gitlab grp/proj whsec_c2VjcmV0a2V5 /bin/other
+gitlab grp/proj2 whsec_b3RoZXJrZXk= /bin/other2
 `
 
 var gitlabKey = []byte("secretkey")
@@ -94,9 +96,26 @@ func TestGitHub(t *testing.T) {
 	if (*envs)[0] != "PUSHHOOK_PROVIDER=github PUSHHOOK_REPO=example/site PUSHHOOK_REF=refs/heads/main PUSHHOOK_COMMIT=abc" {
 		t.Errorf("env = %q", (*envs)[0])
 	}
-	other := `{"repository":{"full_name":"x/y"}}`
-	if c := do(h, ghReq(other, "push", []byte("ghsecret"))); c != 200 || len(*ran) != 1 {
+	// Another repo's secret must not trigger this repo's command.
+	if c := do(h, ghReq(body, "push", []byte("othersecret"))); c != 401 || len(*ran) != 1 {
+		t.Errorf("other repo's secret: got %d, ran %d", c, len(*ran))
+	}
+	unconfigured := `{"repository":{"full_name":"x/y"}}`
+	if c := do(h, ghReq(unconfigured, "push", []byte("ghsecret"))); c != 401 || len(*ran) != 1 {
 		t.Errorf("unconfigured repo: got %d, ran %d", c, len(*ran))
+	}
+}
+
+func TestGitHubSharedSecret(t *testing.T) {
+	h, ran, _, wg := newTestHandler(t)
+	wg.Add(1)
+	body := `{"ref":"refs/heads/main","after":"abc","repository":{"full_name":"example/shared2"}}`
+	if c := do(h, ghReq(body, "push", []byte("sharedsecret"))); c != 202 {
+		t.Fatalf("push: got %d", c)
+	}
+	wg.Wait()
+	if len(*ran) != 1 || (*ran)[0].Command[0] != "/bin/s2" {
+		t.Errorf("ran = %v", *ran)
 	}
 }
 
@@ -122,6 +141,10 @@ func TestGitLab(t *testing.T) {
 	if len(*ran) != 1 || (*ran)[0].Command[0] != "/bin/other" {
 		t.Errorf("ran = %v", *ran)
 	}
+	// Another project's signing token must not trigger this project's command.
+	if c := do(h, glReq(body, []byte("otherkey"), now)); c != 401 || len(*ran) != 1 {
+		t.Errorf("other project's key: got %d, ran %d", c, len(*ran))
+	}
 }
 
 func TestRejects(t *testing.T) {
@@ -143,13 +166,13 @@ func TestConfigErrors(t *testing.T) {
 		t.Error("expected error for missing listen")
 	}
 	for _, c := range []string{
-		"repo github a/b cmd\n",              // missing github-secret
-		"gitlab-secret abc\n",                // no whsec_ prefix
-		"gitlab-secret whsec_!!!\n",          // bad base64
-		"repo bitbucket a/b cmd\n",           // unknown provider
-		"github-secret s\nrepo github a/b\n", // missing command
-		"bogus x\n",                          // unknown directive
-		"github-secret s\nrepo github a/b c\nrepo github A/B d\n", // duplicate
+		"gitlab-secret abc\n",              // global secrets no longer exist
+		"github a/b s\n",                   // missing command
+		"gitlab a/b abc cmd\n",             // no whsec_ prefix
+		"gitlab a/b whsec_!!! cmd\n",       // bad base64
+		"bitbucket a/b s cmd\n",            // unknown provider
+		"bogus x\n",                        // unknown directive
+		"github a/b s c\ngithub A/B s d\n", // duplicate
 	} {
 		if _, err := ParseConfig(strings.NewReader("listen :8080\n" + c)); err == nil {
 			t.Errorf("expected error for %q", c)

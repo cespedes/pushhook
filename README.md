@@ -20,13 +20,14 @@ starting with `#` are ignored.
 | Directive | Meaning |
 |---|---|
 | `listen ADDRESS` | Address to listen on (required, no default). |
-| `github-secret SECRET` | The webhook's "Secret" in GitHub. |
-| `gitlab-secret whsec_...` | The webhook's "Signing token" in GitLab. |
-| `repo github OWNER/NAME COMMAND [ARGS...]` | Command to run on push to a GitHub repo. |
-| `repo gitlab GROUP/PROJECT COMMAND [ARGS...]` | Command to run on push to a GitLab project. |
+| `github OWNER/NAME SECRET COMMAND [ARGS...]` | Command to run on push to a GitHub repo; `SECRET` is the webhook's "Secret". |
+| `gitlab GROUP/PROJECT whsec_... COMMAND [ARGS...]` | Command to run on push to a GitLab project; `whsec_...` is the webhook's "Signing token". |
 
 Commands are executed directly (no shell); arguments are split on whitespace.
-A `repo` line for a provider requires the matching secret to be set.
+Every repository has its own secret, and a request is only accepted for a
+repository if it is signed with that repository's secret, so a repository
+cannot trigger another one's command. Repositories may share a secret on
+purpose (for example, an organization-level webhook), by repeating it.
 Repository names are matched case-insensitively.
 
 ## Webhook setup
@@ -43,9 +44,10 @@ Point the webhook at the server's URL (any path), as a POST of JSON.
 
 ## Behaviour
 
-- Missing or invalid signature: `401`.
-- Valid but not a push event, or a push to a repository that is not
-  configured: `200`, nothing is run. GitHub `ping` replies `200 pong`.
+- Missing or invalid signature, or a push for a repository that is not
+  configured or whose secret did not sign the request: `401`.
+- Validly signed but not a push event: `200`, nothing is run. GitHub `ping`
+  replies `200 pong`.
 - Valid push to a configured repository: `202`, the command runs in the
   background (10 minute timeout). Runs for the same repository are serialised.
   Output is logged.

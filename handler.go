@@ -58,9 +58,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	var p push
 	var ok bool
+	var signed map[repoKey]bool
 	switch {
 	case req.Header.Get("X-Hub-Signature-256") != "":
-		if h.cfg.GitHubSecret == nil || !verifyGitHub(h.cfg.GitHubSecret, body, req.Header.Get("X-Hub-Signature-256")) {
+		signed = h.signedBy(providerGitHub, func(secret []byte) bool {
+			return verifyGitHub(secret, body, req.Header.Get("X-Hub-Signature-256"))
+		})
+		if len(signed) == 0 {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
@@ -75,9 +79,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	case req.Header.Get("webhook-signature") != "":
-		if h.cfg.GitLabSecret == nil || !verifyGitLab(h.cfg.GitLabSecret, body,
-			req.Header.Get("webhook-id"), req.Header.Get("webhook-timestamp"),
-			req.Header.Get("webhook-signature"), h.now()) {
+		signed = h.signedBy(providerGitLab, func(secret []byte) bool {
+			return verifyGitLab(secret, body,
+				req.Header.Get("webhook-id"), req.Header.Get("webhook-timestamp"),
+				req.Header.Get("webhook-signature"), h.now())
+		})
+		if len(signed) == 0 {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
@@ -95,21 +102,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r, found := h.cfg.Repos[repoKey{p.Provider, strings.ToLower(p.Repo)}]
-	if !found {
-		log.Printf("%s push to unconfigured repo %q", p.Provider, p.Repo)
-		io.WriteString(w, "ignored\n")
+	// The repository name comes from the payload, so it only counts if the
+	// signature was made with that repository's own secret.
+	key := repoKey{p.Provider, strings.ToLower(p.Repo)}
+	if !signed[key] {
+		log.Printf("%s push for %q signed with another repo's secret or unconfigured", p.Provider, p.Repo)
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
+	r := h.cfg.Repos[key]
 	env := append(os.Environ(),
 		"PUSHHOOK_PROVIDER="+p.Provider,
 		"PUSHHOOK_REPO="+p.Repo,
 		"PUSHHOOK_REF="+p.Ref,
 		"PUSHHOOK_COMMIT="+p.Commit,
 	)
-	go h.runSerial(repoKey{p.Provider, strings.ToLower(p.Repo)}, r, env)
+	go h.runSerial(key, r, env)
 	w.WriteHeader(http.StatusAccepted)
 	io.WriteString(w, "accepted\n")
+}
+
+// signedBy returns the configured repos of a provider whose secret satisfies
+// check. Every secret is tried, so the time taken does not reveal which one
+// matched.
+func (h *Handler) signedBy(provider string, check func(secret []byte) bool) map[repoKey]bool {
+	signed := make(map[repoKey]bool)
+	for k, r := range h.cfg.Repos {
+		if k.Provider == provider && check(r.Secret) {
+			signed[k] = true
+		}
+	}
+	return signed
 }
 
 // runSerial makes sure a repo's command never runs concurrently with itself.

@@ -15,10 +15,8 @@ const (
 
 // Config is the parsed configuration file.
 type Config struct {
-	Listen       string
-	GitHubSecret []byte // HMAC key for X-Hub-Signature-256
-	GitLabSecret []byte // decoded signing token for webhook-signature
-	Repos        map[repoKey]Repo
+	Listen string
+	Repos  map[repoKey]Repo
 }
 
 type repoKey struct {
@@ -29,18 +27,17 @@ type repoKey struct {
 // Repo describes what to run when a push to a repository is received.
 type Repo struct {
 	Name    string
+	Secret  []byte // HMAC key: GitHub secret, or decoded GitLab signing token
 	Command []string
 }
 
 // ParseConfig reads the configuration format documented in the README:
 //
 //	listen :8080
-//	github-secret <secret>
-//	gitlab-secret whsec_<base64>
-//	repo github owner/name /path/to/command [args...]
-//	repo gitlab group/project /path/to/command [args...]
+//	github owner/name <secret> /path/to/command [args...]
+//	gitlab group/project whsec_<base64> /path/to/command [args...]
 //
-// listen is required. Blank lines and lines starting with '#' are ignored.
+// listen is required, and every repo has its own secret. Blank lines and lines starting with '#' are ignored.
 func ParseConfig(r io.Reader) (*Config, error) {
 	cfg := &Config{Repos: make(map[repoKey]Repo)}
 	sc := bufio.NewScanner(r)
@@ -60,14 +57,6 @@ func ParseConfig(r io.Reader) (*Config, error) {
 	if cfg.Listen == "" {
 		return nil, fmt.Errorf("listen is not set")
 	}
-	for k := range cfg.Repos {
-		if k.Provider == providerGitHub && cfg.GitHubSecret == nil {
-			return nil, fmt.Errorf("repo %s %s: github-secret is not set", k.Provider, k.Name)
-		}
-		if k.Provider == providerGitLab && cfg.GitLabSecret == nil {
-			return nil, fmt.Errorf("repo %s %s: gitlab-secret is not set", k.Provider, k.Name)
-		}
-	}
 	return cfg, nil
 }
 
@@ -78,32 +67,22 @@ func (c *Config) directive(f []string) error {
 			return fmt.Errorf("usage: listen ADDRESS")
 		}
 		c.Listen = f[1]
-	case "github-secret":
-		if len(f) != 2 {
-			return fmt.Errorf("usage: github-secret SECRET")
-		}
-		c.GitHubSecret = []byte(f[1])
-	case "gitlab-secret":
-		if len(f) != 2 {
-			return fmt.Errorf("usage: gitlab-secret whsec_SIGNING_TOKEN")
-		}
-		key, err := decodeSigningToken(f[1])
-		if err != nil {
-			return err
-		}
-		c.GitLabSecret = key
-	case "repo":
+	case providerGitHub, providerGitLab:
 		if len(f) < 4 {
-			return fmt.Errorf("usage: repo github|gitlab NAME COMMAND [ARGS...]")
+			return fmt.Errorf("usage: %s NAME SECRET COMMAND [ARGS...]", f[0])
 		}
-		if f[1] != providerGitHub && f[1] != providerGitLab {
-			return fmt.Errorf("unknown provider %q (want github or gitlab)", f[1])
-		}
-		k := repoKey{f[1], strings.ToLower(f[2])}
+		k := repoKey{f[0], strings.ToLower(f[1])}
 		if _, dup := c.Repos[k]; dup {
-			return fmt.Errorf("duplicate repo %s %s", f[1], f[2])
+			return fmt.Errorf("duplicate %s repo %s", f[0], f[1])
 		}
-		c.Repos[k] = Repo{Name: f[2], Command: f[3:]}
+		secret := []byte(f[2])
+		if f[0] == providerGitLab {
+			var err error
+			if secret, err = decodeSigningToken(f[2]); err != nil {
+				return err
+			}
+		}
+		c.Repos[k] = Repo{Name: f[1], Secret: secret, Command: f[3:]}
 	default:
 		return fmt.Errorf("unknown directive %q", f[0])
 	}
@@ -115,11 +94,11 @@ func (c *Config) directive(f []string) error {
 func decodeSigningToken(s string) ([]byte, error) {
 	b64, ok := strings.CutPrefix(s, "whsec_")
 	if !ok {
-		return nil, fmt.Errorf("gitlab-secret must start with whsec_")
+		return nil, fmt.Errorf("GitLab signing token must start with whsec_")
 	}
 	key, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil || len(key) == 0 {
-		return nil, fmt.Errorf("gitlab-secret is not valid base64")
+		return nil, fmt.Errorf("GitLab signing token is not valid base64")
 	}
 	return key, nil
 }
