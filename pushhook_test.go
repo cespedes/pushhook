@@ -16,6 +16,7 @@ import (
 
 const testConf = `
 # comment
+listen :8080
 github-secret ghsecret
 gitlab-secret whsec_c2VjcmV0a2V5
 repo github Example/Site /bin/deploy -x
@@ -138,6 +139,9 @@ func TestRejects(t *testing.T) {
 }
 
 func TestConfigErrors(t *testing.T) {
+	if _, err := ParseConfig(strings.NewReader("github-secret s\n")); err == nil {
+		t.Error("expected error for missing listen")
+	}
 	for _, c := range []string{
 		"repo github a/b cmd\n",              // missing github-secret
 		"gitlab-secret abc\n",                // no whsec_ prefix
@@ -147,7 +151,7 @@ func TestConfigErrors(t *testing.T) {
 		"bogus x\n",                          // unknown directive
 		"github-secret s\nrepo github a/b c\nrepo github A/B d\n", // duplicate
 	} {
-		if _, err := ParseConfig(strings.NewReader(c)); err == nil {
+		if _, err := ParseConfig(strings.NewReader("listen :8080\n" + c)); err == nil {
 			t.Errorf("expected error for %q", c)
 		}
 	}

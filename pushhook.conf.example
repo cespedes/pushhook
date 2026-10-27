@@ -1,4 +1,4 @@
-# Address to listen on (default :8080)
+# Address to listen on (required)
 listen 127.0.0.1:9000
 
 # GitHub: the "Secret" of the webhook (content type application/json).

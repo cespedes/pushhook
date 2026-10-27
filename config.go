@@ -40,9 +40,9 @@ type Repo struct {
 //	repo github owner/name /path/to/command [args...]
 //	repo gitlab group/project /path/to/command [args...]
 //
-// Blank lines and lines starting with '#' are ignored.
+// listen is required. Blank lines and lines starting with '#' are ignored.
 func ParseConfig(r io.Reader) (*Config, error) {
-	cfg := &Config{Listen: ":8080", Repos: make(map[repoKey]Repo)}
+	cfg := &Config{Repos: make(map[repoKey]Repo)}
 	sc := bufio.NewScanner(r)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
@@ -56,6 +56,9 @@ func ParseConfig(r io.Reader) (*Config, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if cfg.Listen == "" {
+		return nil, fmt.Errorf("listen is not set")
 	}
 	for k := range cfg.Repos {
 		if k.Provider == providerGitHub && cfg.GitHubSecret == nil {

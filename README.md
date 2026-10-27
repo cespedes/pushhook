@@ -19,7 +19,7 @@ starting with `#` are ignored.
 
 | Directive | Meaning |
 |---|---|
-| `listen ADDRESS` | Address to listen on (default `:8080`). |
+| `listen ADDRESS` | Address to listen on (required, no default). |
 | `github-secret SECRET` | The webhook's "Secret" in GitHub. |
 | `gitlab-secret whsec_...` | The webhook's "Signing token" in GitLab. |
 | `repo github OWNER/NAME COMMAND [ARGS...]` | Command to run on push to a GitHub repo. |
