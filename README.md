@@ -42,6 +42,19 @@ Point the webhook at the server's URL (any path), as a POST of JSON.
   verified following the Standard Webhooks scheme; timestamps more than five
   minutes off are rejected.
 
+## Other systems (self-hosted Git, Subversion)
+
+Anything that can send a GitHub-style push request works: a POST with
+`X-GitHub-Event: push`, an `X-Hub-Signature-256` header and a JSON body with
+`ref`, `after` and `repository.full_name`. Configure it with a `github` line.
+Two hook scripts that do exactly that (they need `sh`, `openssl` and `curl`)
+are in `examples/`:
+
+- `examples/git/post-receive`: one request per pushed ref (deleted refs are
+  skipped).
+- `examples/svn/post-commit`: one request per commit, with `ref` set to `svn`
+  and the commit set to `r<revision>`.
+
 ## Behaviour
 
 - Missing or invalid signature, or a push for a repository that is not
