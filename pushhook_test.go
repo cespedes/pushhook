@@ -200,6 +200,10 @@ func TestLogLines(t *testing.T) {
 	do(h, ghReq(push, "ping", []byte("ghsecret")))
 	do(h, httptest.NewRequest("GET", "/", nil))
 	do(h, httptest.NewRequest("POST", "/", strings.NewReader("{}")))
+	fwd := httptest.NewRequest("GET", "/", nil)
+	fwd.Header.Add("X-Forwarded-For", "198.51.100.1, 203.0.113.7")
+	fwd.Header.Add("X-Forwarded-For", "10.0.0.1,  203.0.113.9 ")
+	do(h, fwd)
 
 	want := []string{
 		`192.0.2.1:1234 POST 202 accepted github "example/site" "refs/heads/main"`,
@@ -209,6 +213,7 @@ func TestLogLines(t *testing.T) {
 		`192.0.2.1:1234 POST 200 github ping`,
 		`192.0.2.1:1234 GET 405 method not allowed`,
 		`192.0.2.1:1234 POST 401 missing signature`,
+		`203.0.113.9 GET 405 method not allowed`,
 	}
 	if got := strings.Split(strings.TrimSpace(buf.String()), "\n"); !slices.Equal(got, want) {
 		t.Errorf("log lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

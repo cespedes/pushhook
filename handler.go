@@ -65,13 +65,29 @@ func (r *request) fail(code int, msg, why string) {
 	http.Error(r, msg, code)
 }
 
+// clientAddr returns the address of the client as seen by the reverse proxy in
+// front of us: the last entry of X-Forwarded-For (the one that proxy added),
+// or the address of the connection if the header is absent.
+func clientAddr(req *http.Request) string {
+	if v := req.Header.Values("X-Forwarded-For"); len(v) > 0 {
+		last := v[len(v)-1]
+		if i := strings.LastIndexByte(last, ','); i >= 0 {
+			last = last[i+1:]
+		}
+		if last = strings.TrimSpace(last); last != "" {
+			return last
+		}
+	}
+	return req.RemoteAddr
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r := &request{ResponseWriter: w}
 	defer func() {
 		if r.status == 0 {
 			r.status = http.StatusOK
 		}
-		log.Printf("%s %s %d %s", req.RemoteAddr, req.Method, r.status, r.note)
+		log.Printf("%s %s %d %s", clientAddr(req), req.Method, r.status, r.note)
 	}()
 	h.serve(r, req)
 }

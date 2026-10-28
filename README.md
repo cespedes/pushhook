@@ -55,6 +55,20 @@ are in `examples/`:
 - `examples/svn/post-commit`: one request per commit, with `ref` set to `svn`
   and the commit set to `r<revision>`.
 
+## Running behind a proxy
+
+pushhook is meant to run behind a reverse proxy (nginx, Caddy, ...) that
+terminates TLS and forwards requests to it. It speaks plain HTTP only, so
+have `listen` bind to a loopback address (for example `127.0.0.1:9000`) and
+do not expose it directly.
+
+The client address in the log is the last entry of the `X-Forwarded-For`
+header, that is, the one added by the proxy closest to pushhook; without the
+header it is the address of the connection. This is only trustworthy if
+every request goes through the proxy and the proxy appends to
+`X-Forwarded-For`: a client that reaches pushhook directly can write
+anything there.
+
 ## Behaviour
 
 - Missing or invalid signature, or a push for a repository that is not
@@ -66,7 +80,7 @@ are in `examples/`:
   Output is logged to stderr; when running under systemd with the output sent
   to the journal, the program's own timestamps are left out.
 
-Every request is logged with one line: remote address, method, status code
+Every request is logged with one line: client address, method, status code
 and what happened. For rejected requests this is the reason (for example
 `invalid GitHub signature` or `unconfigured github repo "owner/name"`), which
 is more detailed than the message sent back to the client.
