@@ -66,6 +66,11 @@ are in `examples/`:
   Output is logged to stderr; when running under systemd with the output sent
   to the journal, the program's own timestamps are left out.
 
+Every request is logged with one line: remote address, method, status code
+and what happened. For rejected requests this is the reason (for example
+`invalid GitHub signature` or `unconfigured github repo "owner/name"`), which
+is more detailed than the message sent back to the client.
+
 The command's environment is inherited from the server plus:
 
 - `PUSHHOOK_PROVIDER` (`github` or `gitlab`)

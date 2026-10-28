@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -44,15 +45,46 @@ type push struct {
 	Commit   string
 }
 
+// request wraps the ResponseWriter to remember the status and a note about
+// the outcome, so that ServeHTTP can log one line per request.
+type request struct {
+	http.ResponseWriter
+	status int
+	note   string
+}
+
+func (r *request) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// fail replies with an error. The client only sees msg; why is what gets
+// logged.
+func (r *request) fail(code int, msg, why string) {
+	r.note = why
+	http.Error(r, msg, code)
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r := &request{ResponseWriter: w}
+	defer func() {
+		if r.status == 0 {
+			r.status = http.StatusOK
+		}
+		log.Printf("%s %s %d %s", req.RemoteAddr, req.Method, r.status, r.note)
+	}()
+	h.serve(r, req)
+}
+
+func (h *Handler) serve(w *request, req *http.Request) {
 	if req.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		w.fail(http.StatusMethodNotAllowed, "method not allowed", "method not allowed")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, maxBodySize))
 	if err != nil {
-		http.Error(w, "cannot read body", http.StatusRequestEntityTooLarge)
+		w.fail(http.StatusRequestEntityTooLarge, "cannot read body", "cannot read body: "+err.Error())
 		return
 	}
 
@@ -65,16 +97,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return verifyGitHub(secret, body, req.Header.Get("X-Hub-Signature-256"))
 		})
 		if len(signed) == 0 {
-			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			w.fail(http.StatusUnauthorized, "invalid signature", "invalid GitHub signature")
 			return
 		}
-		switch req.Header.Get("X-GitHub-Event") {
+		switch ev := req.Header.Get("X-GitHub-Event"); ev {
 		case "push":
 			p, ok = parseGitHub(body)
 		case "ping":
+			w.note = "github ping"
 			io.WriteString(w, "pong\n")
 			return
 		default:
+			w.note = fmt.Sprintf("ignored github event %q", ev)
 			io.WriteString(w, "ignored\n")
 			return
 		}
@@ -85,20 +119,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				req.Header.Get("webhook-signature"), h.now())
 		})
 		if len(signed) == 0 {
-			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			w.fail(http.StatusUnauthorized, "invalid signature", "invalid GitLab signature")
 			return
 		}
 		p, ok = parseGitLab(body)
 		if !ok && isGitLabNonPush(body) {
+			w.note = "ignored gitlab event"
 			io.WriteString(w, "ignored\n")
 			return
 		}
 	default:
-		http.Error(w, "missing signature", http.StatusUnauthorized)
+		w.fail(http.StatusUnauthorized, "missing signature", "missing signature")
 		return
 	}
 	if !ok {
-		http.Error(w, "malformed payload", http.StatusBadRequest)
+		w.fail(http.StatusBadRequest, "malformed payload", "malformed payload")
 		return
 	}
 
@@ -106,8 +141,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// signature was made with that repository's own secret.
 	key := repoKey{p.Provider, strings.ToLower(p.Repo)}
 	if !signed[key] {
-		log.Printf("%s push for %q signed with another repo's secret or unconfigured", p.Provider, p.Repo)
-		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		why := fmt.Sprintf("%s repo %q: signed with another repo's secret", p.Provider, p.Repo)
+		if _, configured := h.cfg.Repos[key]; !configured {
+			why = fmt.Sprintf("unconfigured %s repo %q", p.Provider, p.Repo)
+		}
+		w.fail(http.StatusUnauthorized, "invalid signature", why)
 		return
 	}
 	r := h.cfg.Repos[key]
@@ -118,6 +156,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		"PUSHHOOK_COMMIT="+p.Commit,
 	)
 	go h.runSerial(key, r, env)
+	w.note = fmt.Sprintf("accepted %s %q %q", p.Provider, p.Repo, p.Ref)
 	w.WriteHeader(http.StatusAccepted)
 	io.WriteString(w, "accepted\n")
 }

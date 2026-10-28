@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,5 +180,37 @@ func TestConfigErrors(t *testing.T) {
 		if _, err := ParseConfig(strings.NewReader("listen :8080\n" + c)); err == nil {
 			t.Errorf("expected error for %q", c)
 		}
+	}
+}
+
+func TestLogLines(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(os.Stderr); log.SetFlags(log.LstdFlags) })
+
+	h, _, _, wg := newTestHandler(t)
+	push := `{"ref":"refs/heads/main","after":"abc","repository":{"full_name":"example/site"}}`
+	wg.Add(1)
+	do(h, ghReq(push, "push", []byte("ghsecret")))
+	wg.Wait()
+	do(h, ghReq(push, "push", []byte("wrong")))
+	do(h, ghReq(push, "push", []byte("othersecret")))
+	do(h, ghReq(`{"repository":{"full_name":"x/y"}}`, "push", []byte("ghsecret")))
+	do(h, ghReq(push, "ping", []byte("ghsecret")))
+	do(h, httptest.NewRequest("GET", "/", nil))
+	do(h, httptest.NewRequest("POST", "/", strings.NewReader("{}")))
+
+	want := []string{
+		`192.0.2.1:1234 POST 202 accepted github "example/site" "refs/heads/main"`,
+		`192.0.2.1:1234 POST 401 invalid GitHub signature`,
+		`192.0.2.1:1234 POST 401 github repo "example/site": signed with another repo's secret`,
+		`192.0.2.1:1234 POST 401 unconfigured github repo "x/y"`,
+		`192.0.2.1:1234 POST 200 github ping`,
+		`192.0.2.1:1234 GET 405 method not allowed`,
+		`192.0.2.1:1234 POST 401 missing signature`,
+	}
+	if got := strings.Split(strings.TrimSpace(buf.String()), "\n"); !slices.Equal(got, want) {
+		t.Errorf("log lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
