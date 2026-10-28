@@ -63,7 +63,8 @@ are in `examples/`:
   replies `200 pong`.
 - Valid push to a configured repository: `202`, the command runs in the
   background (10 minute timeout). Runs for the same repository are serialised.
-  Output is logged.
+  Output is logged to stderr; when running under systemd with the output sent
+  to the journal, the program's own timestamps are left out.
 
 The command's environment is inherited from the server plus:
 

@@ -14,6 +14,11 @@ func main() {
 	confPath := flag.String("config", "pushhook.conf", "path to the configuration file")
 	flag.Parse()
 
+	// The journal adds its own timestamp to every line.
+	if os.Getenv("JOURNAL_STREAM") != "" {
+		log.SetFlags(0)
+	}
+
 	f, err := os.Open(*confPath)
 	if err != nil {
 		log.Fatal(err)
