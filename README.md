@@ -9,6 +9,8 @@ if their signature is valid. Standard library only.
     go build
     ./pushhook -config pushhook.conf
 
+An example systemd unit is in `examples/systemd/pushhook.service`.
+
 The configuration file contains secrets, so keep it readable only by the
 user running the service (`chmod 600`).
 
@@ -79,6 +81,10 @@ anything there.
   background (10 minute timeout). Runs for the same repository are serialised.
   Output is logged to stderr; when running under systemd with the output sent
   to the journal, the program's own timestamps are left out.
+
+On `SIGTERM` or `SIGINT` pushhook stops accepting requests and waits for the
+commands that are running (at most 10 minutes each); commands still queued
+behind them are not started. A second signal exits immediately.
 
 Every request is logged with one line: client address, method, status code
 and what happened. For rejected requests this is the reason (for example

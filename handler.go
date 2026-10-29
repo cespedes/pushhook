@@ -11,12 +11,17 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
 	maxBodySize = 25 << 20 // GitHub's payload cap
 	runTimeout  = 10 * time.Minute
+
+	// waitDelay is how long to wait for a killed command's output to close:
+	// a child it left running could otherwise hold the pipes open forever.
+	waitDelay = 5 * time.Second
 )
 
 // Handler receives webhooks, verifies them and runs the configured commands.
@@ -29,6 +34,9 @@ type Handler struct {
 
 	mu    sync.Mutex
 	locks map[repoKey]*sync.Mutex
+
+	running  sync.WaitGroup // commands started and not yet finished
+	stopping atomic.Bool    // set by Shutdown: queued commands do not start
 }
 
 func NewHandler(cfg *Config) *Handler {
@@ -171,7 +179,11 @@ func (h *Handler) serve(w *request, req *http.Request) {
 		"PUSHHOOK_REF="+p.Ref,
 		"PUSHHOOK_COMMIT="+p.Commit,
 	)
-	go h.runSerial(key, r, env)
+	h.running.Add(1)
+	go func() {
+		defer h.running.Done()
+		h.runSerial(key, r, env)
+	}()
 	w.note = fmt.Sprintf("accepted %s %q %q", p.Provider, p.Repo, p.Ref)
 	w.WriteHeader(http.StatusAccepted)
 	io.WriteString(w, "accepted\n")
@@ -201,7 +213,19 @@ func (h *Handler) runSerial(k repoKey, r Repo, env []string) {
 	h.mu.Unlock()
 	l.Lock()
 	defer l.Unlock()
+	if h.stopping.Load() {
+		log.Printf("%s: not run, shutting down", r.Name)
+		return
+	}
 	h.run(r, env)
+}
+
+// Shutdown waits for the commands that are running. Commands still queued
+// behind them are dropped. Call it after the server has stopped accepting
+// requests.
+func (h *Handler) Shutdown() {
+	h.stopping.Store(true)
+	h.running.Wait()
 }
 
 func runCommand(r Repo, env []string) {
@@ -209,6 +233,7 @@ func runCommand(r Repo, env []string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, r.Command[0], r.Command[1:]...)
 	cmd.Env = env
+	cmd.WaitDelay = waitDelay
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %v\n%s", r.Name, err, out)

@@ -1,0 +1,32 @@
+# Example systemd unit. Install as /etc/systemd/system/pushhook.service, with
+# the binary in /usr/local/bin and the configuration in /etc/pushhook.conf
+# (owned by the pushhook user, mode 0600):
+#
+#   useradd --system --shell /usr/sbin/nologin pushhook
+#   systemctl daemon-reload && systemctl enable --now pushhook
+#
+# The restrictions below also apply to the commands pushhook runs, since they
+# are its child processes. Adjust them to what your commands need, e.g. add
+# the directories they write to in ReadWritePaths.
+
+[Unit]
+Description=Run commands on GitHub and GitLab push webhooks
+After=network.target
+
+[Service]
+User=pushhook
+ExecStart=/usr/local/bin/pushhook -config /etc/pushhook.conf
+Restart=on-failure
+
+# On stop, pushhook waits for the commands that are running, which are killed
+# after 10 minutes at most.
+TimeoutStopSec=11min
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+#ReadWritePaths=/var/www
+
+[Install]
+WantedBy=multi-user.target

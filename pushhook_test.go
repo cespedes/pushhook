@@ -253,3 +253,41 @@ func TestLogLines(t *testing.T) {
 		t.Errorf("log lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+func TestShutdownWaitsForRunningAndDropsQueued(t *testing.T) {
+	h, _, _, _ := newTestHandler(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	runs := 0
+	h.run = func(r Repo, env []string) {
+		mu.Lock()
+		runs++
+		mu.Unlock()
+		started <- struct{}{}
+		<-release
+	}
+	body := `{"ref":"refs/heads/main","after":"abc","repository":{"full_name":"example/site"}}`
+	if c := do(h, ghReq(body, "push", []byte("ghsecret"))); c != 202 {
+		t.Fatalf("first push: got %d", c)
+	}
+	<-started
+	if c := do(h, ghReq(body, "push", []byte("ghsecret"))); c != 202 { // queued behind the first
+		t.Fatalf("second push: got %d", c)
+	}
+
+	done := make(chan struct{})
+	go func() { h.Shutdown(); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("Shutdown returned while a command was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != 1 {
+		t.Errorf("runs = %d, want 1 (the queued command must not start)", runs)
+	}
+}
