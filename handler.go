@@ -235,6 +235,7 @@ func parseGitLab(body []byte) (push, bool) {
 	var v struct {
 		ObjectKind  string `json:"object_kind"`
 		Ref         string `json:"ref"`
+		After       string `json:"after"`
 		CheckoutSHA string `json:"checkout_sha"`
 		Project     struct {
 			Path string `json:"path_with_namespace"`
@@ -243,7 +244,19 @@ func parseGitLab(body []byte) (push, bool) {
 	if json.Unmarshal(body, &v) != nil || (v.ObjectKind != "push" && v.ObjectKind != "tag_push") || v.Project.Path == "" {
 		return push{}, false
 	}
-	return push{providerGitLab, v.Project.Path, v.Ref, v.CheckoutSHA}, true
+	// checkout_sha is null when the push deletes the ref; report the all-zeros
+	// "after" instead, as GitHub does.
+	commit := v.CheckoutSHA
+	if isZeroSHA(v.After) {
+		commit = v.After
+	}
+	return push{providerGitLab, v.Project.Path, v.Ref, commit}, true
+}
+
+// isZeroSHA reports whether s is the all-zeros object name that Git uses for
+// "no object", as in the "after" of a push that deletes a ref.
+func isZeroSHA(s string) bool {
+	return s != "" && strings.Trim(s, "0") == ""
 }
 
 // isGitLabNonPush reports whether body is a valid GitLab event other than a

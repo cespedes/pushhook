@@ -90,7 +90,7 @@ The command's environment is inherited from the server plus:
 - `PUSHHOOK_PROVIDER` (`github` or `gitlab`)
 - `PUSHHOOK_REPO`
 - `PUSHHOOK_REF` (e.g. `refs/heads/main`)
-- `PUSHHOOK_COMMIT`
+- `PUSHHOOK_COMMIT` (all zeros when the push deleted the branch or tag)
 
 The command is run for pushes to any branch or tag; check `PUSHHOOK_REF` in the
 command if you only care about one.

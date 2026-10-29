@@ -99,6 +99,18 @@ func TestGitHub(t *testing.T) {
 	if (*envs)[0] != "PUSHHOOK_PROVIDER=github PUSHHOOK_REPO=example/site PUSHHOOK_REF=refs/heads/main PUSHHOOK_COMMIT=abc" {
 		t.Errorf("env = %q", (*envs)[0])
 	}
+	// A deletion runs the command, with an all-zeros commit.
+	zero := strings.Repeat("0", 40)
+	del := `{"ref":"refs/heads/old","after":"` + zero + `","deleted":true,"repository":{"full_name":"example/site"}}`
+	wg.Add(1)
+	if c := do(h, ghReq(del, "push", []byte("ghsecret"))); c != 202 {
+		t.Fatalf("deletion: got %d", c)
+	}
+	wg.Wait()
+	if got := (*envs)[len(*envs)-1]; !strings.HasSuffix(got, "PUSHHOOK_REF=refs/heads/old PUSHHOOK_COMMIT="+zero) {
+		t.Errorf("deletion env = %q", got)
+	}
+	*ran = (*ran)[:1]
 	// Another repo's secret must not trigger this repo's command.
 	if c := do(h, ghReq(body, "push", []byte("othersecret"))); c != 401 || len(*ran) != 1 {
 		t.Errorf("other repo's secret: got %d, ran %d", c, len(*ran))
@@ -123,7 +135,7 @@ func TestGitHubSharedSecret(t *testing.T) {
 }
 
 func TestGitLab(t *testing.T) {
-	h, ran, _, wg := newTestHandler(t)
+	h, ran, envs, wg := newTestHandler(t)
 	body := `{"object_kind":"push","ref":"refs/heads/main","checkout_sha":"abc","project":{"path_with_namespace":"grp/proj"}}`
 	now := time.Now()
 
@@ -153,6 +165,19 @@ func TestGitLab(t *testing.T) {
 	if len(*ran) != 2 {
 		t.Errorf("tag push ran = %v", *ran)
 	}
+	// A tag deletion runs the command too: checkout_sha is null, so the
+	// commit is the all-zeros "after".
+	zero := strings.Repeat("0", 40)
+	del := `{"object_kind":"tag_push","ref":"refs/tags/v1","after":"` + zero + `","checkout_sha":null,"project":{"path_with_namespace":"grp/proj"}}`
+	wg.Add(1)
+	if c := do(h, glReq(del, gitlabKey, now)); c != 202 {
+		t.Fatalf("tag deletion: got %d", c)
+	}
+	wg.Wait()
+	if got := (*envs)[len(*envs)-1]; got != "PUSHHOOK_PROVIDER=gitlab PUSHHOOK_REPO=grp/proj PUSHHOOK_REF=refs/tags/v1 PUSHHOOK_COMMIT="+zero {
+		t.Errorf("tag deletion env = %q", got)
+	}
+	*ran = (*ran)[:2]
 	// Another project's signing token must not trigger this project's command.
 	if c := do(h, glReq(body, []byte("otherkey"), now)); c != 401 || len(*ran) != 2 {
 		t.Errorf("other project's key: got %d, ran %d", c, len(*ran))
