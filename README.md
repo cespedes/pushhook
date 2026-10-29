@@ -37,8 +37,8 @@ Point the webhook at the server's URL (any path), as a POST of JSON.
 - **GitHub**: content type `application/json`, set the *Secret*, event
   "Just the push event". The `X-Hub-Signature-256` header is verified
   (HMAC-SHA256 of the body).
-- **GitLab**: enable *Push events* and set a *Signing token*. The
-  `webhook-signature`, `webhook-id` and `webhook-timestamp` headers are
+- **GitLab**: enable *Push events* and *Tag push events* and set a
+  *Signing token*. The `webhook-signature`, `webhook-id` and `webhook-timestamp` headers are
   verified following the Standard Webhooks scheme; timestamps more than five
   minutes off are rejected.
 
@@ -92,5 +92,5 @@ The command's environment is inherited from the server plus:
 - `PUSHHOOK_REF` (e.g. `refs/heads/main`)
 - `PUSHHOOK_COMMIT`
 
-The command is run for pushes to any branch; check `PUSHHOOK_REF` in the
+The command is run for pushes to any branch or tag; check `PUSHHOOK_REF` in the
 command if you only care about one.

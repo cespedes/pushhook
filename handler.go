@@ -240,16 +240,17 @@ func parseGitLab(body []byte) (push, bool) {
 			Path string `json:"path_with_namespace"`
 		} `json:"project"`
 	}
-	if json.Unmarshal(body, &v) != nil || v.ObjectKind != "push" || v.Project.Path == "" {
+	if json.Unmarshal(body, &v) != nil || (v.ObjectKind != "push" && v.ObjectKind != "tag_push") || v.Project.Path == "" {
 		return push{}, false
 	}
 	return push{providerGitLab, v.Project.Path, v.Ref, v.CheckoutSHA}, true
 }
 
-// isGitLabNonPush reports whether body is a valid GitLab event other than a push.
+// isGitLabNonPush reports whether body is a valid GitLab event other than a
+// branch or tag push.
 func isGitLabNonPush(body []byte) bool {
 	var v struct {
 		ObjectKind string `json:"object_kind"`
 	}
-	return json.Unmarshal(body, &v) == nil && v.ObjectKind != "" && v.ObjectKind != "push"
+	return json.Unmarshal(body, &v) == nil && v.ObjectKind != "" && v.ObjectKind != "push" && v.ObjectKind != "tag_push"
 }

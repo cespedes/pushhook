@@ -144,8 +144,17 @@ func TestGitLab(t *testing.T) {
 	if len(*ran) != 1 || (*ran)[0].Command[0] != "/bin/other" {
 		t.Errorf("ran = %v", *ran)
 	}
+	tag := `{"object_kind":"tag_push","ref":"refs/tags/v1","checkout_sha":"def","project":{"path_with_namespace":"grp/proj"}}`
+	wg.Add(1)
+	if c := do(h, glReq(tag, gitlabKey, now)); c != 202 {
+		t.Fatalf("tag push: got %d", c)
+	}
+	wg.Wait()
+	if len(*ran) != 2 {
+		t.Errorf("tag push ran = %v", *ran)
+	}
 	// Another project's signing token must not trigger this project's command.
-	if c := do(h, glReq(body, []byte("otherkey"), now)); c != 401 || len(*ran) != 1 {
+	if c := do(h, glReq(body, []byte("otherkey"), now)); c != 401 || len(*ran) != 2 {
 		t.Errorf("other project's key: got %d, ran %d", c, len(*ran))
 	}
 }
